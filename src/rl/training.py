@@ -54,6 +54,8 @@ class Trainer:
         exploration_count = 0
         exploitation_count = 0
 
+        success = False
+
         for _ in range(max_steps):
 
             # -----------------------------------------
@@ -104,10 +106,11 @@ class Trainer:
             state = next_state
 
             # -----------------------------------------
-            # 6. Stop if episode is finished
+            # 6. Check whether the goal was reached
             # -----------------------------------------
 
             if done:
+                success = True
                 break
 
         # -----------------------------------------
@@ -118,7 +121,8 @@ class Trainer:
             reward=total_reward,
             steps=steps,
             exploration_count=exploration_count,
-            exploitation_count=exploitation_count
+            exploitation_count=exploitation_count,
+            success=success
         )
 
         return total_reward, steps
