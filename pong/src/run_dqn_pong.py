@@ -8,6 +8,7 @@ from src.replay_buffer import ReplayBuffer
 # from src.train_step import train_step
 from src.training import train_step
 from collections import deque
+from src.target_network import update_target_network
 
 
 def main():
@@ -24,7 +25,8 @@ def main():
     print("Model device:", next(model.parameters()).device)
 
     target_model = DQN().to(device)
-    target_model.load_state_dict(model.state_dict())
+    update_target_network(model, target_model)
+    # target_model.load_state_dict(model.state_dict())
     target_model.eval()
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -116,7 +118,8 @@ def main():
                     episode_losses.append(loss)
                     training_updates += 1
                     if training_updates % target_update_frequency == 0:
-                        target_model.load_state_dict(model.state_dict())
+                        update_target_network(model, target_model)
+                        # target_model.load_state_dict(model.state_dict())
 
             # Move to the next state
             state = next_state
