@@ -5,6 +5,7 @@ import numpy as np
 def train_step(
     model,
     replay_buffer,
+    target_model,
     optimizer,
     batch_size,
     gamma,
@@ -68,7 +69,7 @@ def train_step(
 
     # 5. Calculate the Q-values for the next states
     with torch.no_grad():
-        next_q_values = model(next_states)
+        next_q_values = target_model(next_states)
 
         max_next_q_values = next_q_values.max(
             dim=1

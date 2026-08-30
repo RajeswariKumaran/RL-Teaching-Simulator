@@ -20,6 +20,8 @@ def create_experience():
 
 def test_train_step_returns_none_with_not_enough_experiences():
     model = DQN()
+    target_model = DQN()
+    target_model.load_state_dict(model.state_dict())
     replay_buffer = ReplayBuffer(capacity=100)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -29,6 +31,7 @@ def test_train_step_returns_none_with_not_enough_experiences():
 
     loss = train_step(
         model=model,
+        target_model=target_model,
         replay_buffer=replay_buffer,
         optimizer=optimizer,
         batch_size=4,
@@ -43,6 +46,8 @@ def test_train_step_updates_the_model():
     torch.manual_seed(42)
 
     model = DQN()
+    target_model = DQN()
+    target_model.load_state_dict(model.state_dict())
     replay_buffer = ReplayBuffer(capacity=100)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -56,14 +61,33 @@ def test_train_step_updates_the_model():
         for parameter in model.parameters()
     ]
 
+    policy_parameters_before = [
+        parameter.clone().detach()
+        for parameter in model.parameters()
+    ]
+
+    target_parameters_before = [
+        parameter.clone().detach()
+        for parameter in target_model.parameters()
+    ]
     loss = train_step(
         model=model,
+        target_model=target_model,
         replay_buffer=replay_buffer,
         optimizer=optimizer,
         batch_size=4,
         gamma=0.99,
         device=torch.device("cpu"),
     )
+    target_parameters_changed = any(
+        not torch.equal(before, after)
+        for before, after in zip(
+            target_parameters_before,
+            target_model.parameters(),
+        )
+    )
+
+    assert not target_parameters_changed
 
     # A training update should produce a loss
     assert loss is not None

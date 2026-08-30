@@ -23,6 +23,9 @@ def main():
     model = DQN().to(device)
     print("Model device:", next(model.parameters()).device)
 
+    target_model = DQN().to(device)
+    target_model.load_state_dict(model.state_dict())
+    target_model.eval()
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=0.0001
@@ -35,16 +38,18 @@ def main():
     train_frequency = 4
     gamma = 0.99
 
-    # num_episodes = 100
-    num_episodes = 5
-    # max_steps_per_episode = 1_000
-    max_steps_per_episode = 300
+    num_episodes = 100
+    # num_episodes = 5
+    max_steps_per_episode = 1_000
+    # max_steps_per_episode = 300
 
     epsilon = 1.0
     epsilon_min = 0.1
     epsilon_decay = 0.995
+    target_update_frequency = 1_000
 
     reward_history = deque(maxlen=10)
+    training_updates = 0
     for episode in range(num_episodes):
 
         # Reset the environment at the start of each episode
@@ -100,15 +105,18 @@ def main():
 
                 loss = train_step(
                     model=model,
+                    target_model=target_model,
                     optimizer=optimizer,
                     replay_buffer=replay_buffer,
                     batch_size=batch_size,
                     gamma=gamma,
                     device=device
                 )
-
                 if loss is not None:
                     episode_losses.append(loss)
+                    training_updates += 1
+                    if training_updates % target_update_frequency == 0:
+                        target_model.load_state_dict(model.state_dict())
 
             # Move to the next state
             state = next_state
