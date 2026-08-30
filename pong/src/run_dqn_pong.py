@@ -5,74 +5,107 @@ from src.pong_environment import PongEnvironment
 from src.state import PongState
 from src.action_selection import select_action
 from src.replay_buffer import ReplayBuffer
+from src.train_step import train_step
 
 
 def main():
 
     env = PongEnvironment()
     state_manager = PongState()
-    model = DQN()
+    device = torch.device(
+        "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+
+    print("Using device:", device)
+
+    model = DQN().to(device)
+    print("Model device:", next(model.parameters()).device)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=0.0001
+    )
     replay_buffer = ReplayBuffer(capacity=10_000)
 
-    observation, info = env.reset()
-    state = state_manager.reset(observation)
+    batch_size = 32
+    training_start = 1_000
+    gamma = 0.99
 
-    done = False
-    total_reward = 0
-    step = 0
+    num_episodes = 100
+    max_steps_per_episode = 1_000
+
     epsilon = 0.5
 
-    while not done and step < 100:
+    for episode in range(num_episodes):
 
-        # Convert the current state to a PyTorch tensor
-        state_tensor = torch.tensor(
-            state,
-            dtype=torch.float32
-        ).unsqueeze(0)
+        # Reset the environment at the start of each episode
+        observation, info = env.reset()
+        state = state_manager.reset(observation)
 
-        # Select an action using epsilon-greedy exploration
-        action = select_action(
-            model,
-            state_tensor,
-            epsilon=epsilon
-        )
+        done = False
+        total_reward = 0
 
-        # Take the action in Pong
-        observation, reward, terminated, truncated, info = (
-            env.step(action)
-        )
+        for step in range(max_steps_per_episode):
 
-        # Create the next RL state
-        next_state = state_manager.step(observation)
+            # Convert the current state to a PyTorch tensor
+            state_tensor = torch.tensor(
+                state,
+                dtype=torch.float32,
+                device=device
+            ).unsqueeze(0)
 
-        # Check whether the episode has ended
-        done = terminated or truncated
+            # Select an action using epsilon-greedy exploration
+            action = select_action(
+                model,
+                state_tensor,
+                epsilon=epsilon
+            )
 
-        # Store the experience
-        replay_buffer.push(
-            state,
-            action,
-            reward,
-            next_state,
-            done
-        )
+            # Take the action in Pong
+            observation, reward, terminated, truncated, info = (
+                env.step(action)
+            )
 
-        # Move to the next state
-        state = next_state
+            # Create the next RL state
+            next_state = state_manager.step(observation)
 
-        total_reward += reward
-        step += 1
+            # Check whether the episode has ended
+            done = terminated or truncated
+
+            # Store the experience
+            replay_buffer.push(
+                state,
+                action,
+                reward,
+                next_state,
+                done
+            )
+
+            # Start training once enough experiences have been collected
+            if len(replay_buffer) >= training_start:
+
+                loss = train_step(
+                    model=model,
+                    optimizer=optimizer,
+                    replay_buffer=replay_buffer,
+                    batch_size=batch_size,
+                    gamma=gamma,
+                    device=device
+                )
+
+            # Move to the next state
+            state = next_state
+
+            total_reward += reward
+
+            if done:
+                break
 
         print(
-            f"Step: {step}, "
-            f"Action: {action}, "
-            f"Reward: {reward}, "
-            f"Total reward: {total_reward}"
+            f"Episode {episode + 1}: "
+            f"Total reward = {total_reward}, "
+            f"Replay buffer size = {len(replay_buffer)}"
         )
 
-    print("\nEpisode finished")
-    print("Total reward:", total_reward)
-    print("Experiences stored:", len(replay_buffer))
 
     env.close()
 
