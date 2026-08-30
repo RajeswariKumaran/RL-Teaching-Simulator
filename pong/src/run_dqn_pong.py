@@ -7,6 +7,7 @@ from src.action_selection import select_action
 from src.replay_buffer import ReplayBuffer
 # from src.train_step import train_step
 from src.training import train_step
+from collections import deque
 
 
 def main():
@@ -43,6 +44,7 @@ def main():
     epsilon_min = 0.1
     epsilon_decay = 0.995
 
+    reward_history = deque(maxlen=10)
     for episode in range(num_episodes):
 
         # Reset the environment at the start of each episode
@@ -122,9 +124,13 @@ def main():
             else None
         )
         # print("Average Loss:", average_loss)
+        reward_history.append(total_reward)
+        average_reward = sum(reward_history) / len(reward_history)
         print(
             f"Episode {episode + 1}: "
             f"Total reward = {total_reward}, "
+            f"Average reward (last {len(reward_history)}) = "
+            f"{average_reward:.2f}, "
             f"Replay buffer size = {len(replay_buffer)},"
             f"Average Loss = {average_loss},"
             f"Epsilon = {epsilon:.3f}"
