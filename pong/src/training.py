@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-
+import numpy as np
 
 def train_step(
     model,
@@ -27,7 +27,7 @@ def train_step(
 
     # 3. Move everything to the selected device
     states = torch.tensor(
-        states,
+        np.array(states),
         dtype=torch.float32,
         device=device,
     )
@@ -45,7 +45,7 @@ def train_step(
     )
 
     next_states = torch.tensor(
-        next_states,
+        np.array(next_states),
         dtype=torch.float32,
         device=device,
     )

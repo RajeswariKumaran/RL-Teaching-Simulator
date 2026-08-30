@@ -39,7 +39,9 @@ def main():
     # max_steps_per_episode = 1_000
     max_steps_per_episode = 300
 
-    epsilon = 0.5
+    epsilon = 1.0
+    epsilon_min = 0.1
+    epsilon_decay = 0.995
 
     for episode in range(num_episodes):
 
@@ -124,9 +126,13 @@ def main():
             f"Episode {episode + 1}: "
             f"Total reward = {total_reward}, "
             f"Replay buffer size = {len(replay_buffer)},"
-            f"Average Loss = {average_loss}"
+            f"Average Loss = {average_loss},"
+            f"Epsilon = {epsilon:.3f}"
         )
-
+        epsilon = max(
+            epsilon_min,
+            epsilon * epsilon_decay
+        )
 
     env.close()
 
