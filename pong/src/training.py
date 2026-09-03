@@ -31,7 +31,7 @@ def train_step(
         np.array(states),
         dtype=torch.float32,
         device=device,
-    )
+    )/255.0
 
     actions = torch.tensor(
         actions,
@@ -49,7 +49,7 @@ def train_step(
         np.array(next_states),
         dtype=torch.float32,
         device=device,
-    )
+    )/255.0
 
     dones = torch.tensor(
         dones,

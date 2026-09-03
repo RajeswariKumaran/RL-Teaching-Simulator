@@ -41,8 +41,8 @@ def main():
     target_update_frequency = 1_000
     gamma = 0.99
 
-    num_episodes = 100
-    # num_episodes = 5
+    # num_episodes = 100
+    num_episodes = 5
     max_steps_per_episode = 1_000
     # max_steps_per_episode = 300
 
@@ -60,6 +60,11 @@ def main():
 
         done = False
         total_reward = 0
+        action_counts = {
+            0: 0,  # NOOP
+            1: 0,  # LEFT
+            2: 0,  # RIGHT
+        }
 
         episode_losses = []
         for step in range(max_steps_per_episode):
@@ -69,7 +74,7 @@ def main():
                 state,
                 dtype=torch.float32,
                 device=device
-            ).unsqueeze(0)
+            ).unsqueeze(0) / 255.0
 
             # Select an action using epsilon-greedy exploration
             action = select_action(
@@ -77,7 +82,7 @@ def main():
                 state_tensor,
                 epsilon=epsilon
             )
-
+            action_counts[action] += 1
             # Take the action in Pong
             observation, reward, terminated, truncated, info = (
                 env.step(action)
@@ -144,13 +149,18 @@ def main():
             f"{average_reward:.2f}, "
             f"Replay buffer size = {len(replay_buffer)},"
             f"Average Loss = {average_loss},"
-            f"Epsilon = {epsilon:.3f}"
+            f"Epsilon = {epsilon:.3f},"
+            f"Actions = {action_counts}"
         )
         epsilon = max(
             epsilon_min,
             epsilon * epsilon_decay
         )
 
+    torch.save(
+        model.state_dict(),
+        "pong_dqn_model.pth"
+    )
     env.close()
 
 
