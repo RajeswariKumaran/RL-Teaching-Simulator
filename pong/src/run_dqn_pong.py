@@ -10,10 +10,15 @@ from src.training import train_step
 from collections import deque
 from src.target_network import update_target_network
 
+from PIL import Image
+import numpy as np
+
+
 
 def main():
 
     env = PongEnvironment()
+
     state_manager = PongState()
     device = torch.device(
         "mps" if torch.backends.mps.is_available() else "cpu"
@@ -32,7 +37,7 @@ def main():
         model.parameters(),
         lr=0.0001
     )
-    replay_buffer = ReplayBuffer(capacity=10_000)
+    replay_buffer = ReplayBuffer(capacity=50_000)
 
     batch_size = 32
     training_start = 1_000
@@ -41,8 +46,8 @@ def main():
     target_update_frequency = 1_000
     gamma = 0.99
 
-    # num_episodes = 100
-    num_episodes = 5
+    num_episodes = 100
+    # num_episodes = 5
     max_steps_per_episode = 1_000
     # max_steps_per_episode = 300
 
@@ -57,9 +62,16 @@ def main():
         # Reset the environment at the start of each episode
         observation, info = env.reset()
         state = state_manager.reset(observation)
+        # Save the 4 individual frames in the initial state
+        for i, frame in enumerate(state):
+            Image.fromarray(frame).save(f"pong_frame_{i + 1}.png")
 
         done = False
         total_reward = 0
+        positive_rewards = 0
+        negative_rewards = 0
+        zero_rewards = 0
+
         action_counts = {
             0: 0,  # NOOP
             1: 0,  # LEFT
@@ -90,6 +102,12 @@ def main():
 
             # Create the next RL state
             next_state = state_manager.step(observation)
+
+            if step == 100:
+                for i, frame in enumerate(next_state):
+                    Image.fromarray(frame).save(
+                        f"pong_frame_step100_{i + 1}.png"
+                    )
 
             # Check whether the episode has ended
             done = terminated or truncated
@@ -130,6 +148,12 @@ def main():
             state = next_state
 
             total_reward += reward
+            if reward > 0:
+                positive_rewards += 1
+            elif reward < 0:
+                negative_rewards += 1
+            else:
+                zero_rewards += 1
 
             if done:
                 break

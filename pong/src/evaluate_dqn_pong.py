@@ -4,6 +4,7 @@ from src.dqn import DQN
 from src.pong_environment import PongEnvironment
 from src.state import PongState
 from src.action_selection import select_action
+import numpy as np
 
 
 def main():
@@ -51,20 +52,27 @@ def main():
                 device=device
             ).unsqueeze(0) / 255.0
 
-            if step % 100 == 0:
-                with torch.no_grad():
-                    q_values = model(state_tensor)
 
-                print(
-                    "Q-values:",
-                    q_values.squeeze(0).cpu().numpy()
-                )
+            with torch.no_grad():
+                q_values = model(state_tensor)
+
+
             # No exploration — choose the best action
             action = select_action(
                 model,
                 state_tensor,
                 epsilon=0.0
             )
+            if step % 300 == 0:
+
+                print(
+                    f"Step {step}: Q-values = "
+                    f"{q_values.squeeze(0).cpu().numpy()}"
+                )
+
+                print(
+                    f"Selected action: {action}"
+                )
             action_counts[action] = action_counts.get(action, 0) + 1
             observation, reward, terminated, truncated, info = (
                 env.step(action)

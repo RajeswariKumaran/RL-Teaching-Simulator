@@ -44,7 +44,13 @@ def train_step(
         dtype=torch.float32,
         device=device,
     )
-
+    if torch.rand(1).item() < 0.005:
+        print(
+            "Reward distribution:",
+            "negative =", (rewards < 0).sum().item(),
+            "zero =", (rewards == 0).sum().item(),
+            "positive =", (rewards > 0).sum().item(),
+        )
     next_states = torch.tensor(
         np.array(next_states),
         dtype=torch.float32,
@@ -81,6 +87,13 @@ def train_step(
             * max_next_q_values
             * (1 - dones)
         )
+        if torch.rand(1).item() < 0.001:
+            print(
+                "TRAIN DIAGNOSTIC:",
+                "reward min/max =", rewards.min().item(), rewards.max().item(),
+                "target min/max =", target_q_values.min().item(), target_q_values.max().item(),
+                "current Q min/max =", current_q_values.min().item(), current_q_values.max().item(),
+            )
 
     # 6. Compare the model's prediction with the Bellman target
     loss = F.mse_loss(

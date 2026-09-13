@@ -20,6 +20,11 @@ class PongEnvironment:
             2: 2,  # RIGHT
         }
 
+        # print("Environment:", self.env)
+        # print("Action meanings:", self.env.unwrapped.get_action_meanings())
+        # print("Observation space:", self.env.observation_space)
+        # print("Action space:", self.env.action_space)
+
     def reset(self):
 
         observation, info = self.env.reset()
