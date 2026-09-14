@@ -22,7 +22,9 @@ def train_step(
         return None
 
     # 2. Sample a random batch from the replay buffer
-    experiences = replay_buffer.sample(batch_size)
+    experiences, indices, weights = replay_buffer.sample(
+        batch_size
+    )
 
     states, actions, rewards, next_states, dones = zip(*experiences)
 
@@ -62,7 +64,11 @@ def train_step(
         dtype=torch.float32,
         device=device,
     )
-
+    weights = torch.tensor(
+        weights,
+        dtype=torch.float32,
+        device=device
+    )
     # 4. Get the Q-values predicted by the model
     q_values = model(states)
 
@@ -75,11 +81,20 @@ def train_step(
 
     # 5. Calculate the Q-values for the next states
     with torch.no_grad():
+
+        # Online network chooses the best action
+        next_actions = model(next_states).argmax(
+            dim=1,
+            keepdim=True
+        )
+
+        # Target network evaluates that action
         next_q_values = target_model(next_states)
 
-        max_next_q_values = next_q_values.max(
-            dim=1
-        ).values
+        max_next_q_values = next_q_values.gather(
+            1,
+            next_actions
+        ).squeeze(1)
 
         # Bellman target
         target_q_values = rewards + (
@@ -96,10 +111,19 @@ def train_step(
             )
 
     # 6. Compare the model's prediction with the Bellman target
-    loss = F.mse_loss(
+    td_errors = (
+        target_q_values - current_q_values
+    )
+
+    losses = F.smooth_l1_loss(
         current_q_values,
         target_q_values,
+        reduction="none"
     )
+
+    loss = (
+        weights * losses
+    ).mean()
 
     # 7. Update the neural network
     optimizer.zero_grad()
@@ -107,5 +131,17 @@ def train_step(
     loss.backward()
 
     optimizer.step()
+
+    new_priorities = (
+        td_errors.detach()
+        .abs()
+        .cpu()
+        .numpy()
+    )
+
+    replay_buffer.update_priorities(
+        indices,
+        new_priorities
+    )
 
     return loss.item()

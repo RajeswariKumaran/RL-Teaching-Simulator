@@ -40,20 +40,20 @@ def main():
     replay_buffer = ReplayBuffer(capacity=50_000)
 
     batch_size = 32
-    training_start = 1_000
+    training_start = 10_000
     # training_start = 300
     train_frequency = 4
-    target_update_frequency = 1_000
+    target_update_frequency = 10_000
     gamma = 0.99
 
-    num_episodes = 100
+    num_episodes = 1000
     # num_episodes = 5
     max_steps_per_episode = 1_000
     # max_steps_per_episode = 300
 
     epsilon = 1.0
     epsilon_min = 0.1
-    epsilon_decay = 0.995
+    epsilon_decay = 0.9995
 
     reward_history = deque(maxlen=10)
     training_updates = 0

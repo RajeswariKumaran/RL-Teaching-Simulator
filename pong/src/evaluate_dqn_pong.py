@@ -32,7 +32,7 @@ def main():
     env = PongEnvironment()
     state_manager = PongState()
 
-    num_episodes = 1
+    num_episodes = 10
     max_steps_per_episode = 1_000
 
     rewards = []

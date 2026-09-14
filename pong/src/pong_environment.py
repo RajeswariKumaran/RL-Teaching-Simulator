@@ -10,7 +10,8 @@ class PongEnvironment:
 
         self.env = gym.make(
             "ALE/Pong-v5",
-            render_mode=render_mode
+            render_mode=render_mode,
+            frameskip=4
         )
 
         # Our agent only learns these three actions.
