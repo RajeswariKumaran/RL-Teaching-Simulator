@@ -1,38 +1,37 @@
 import gymnasium as gym
 import ale_py
 
+import numpy as np
+
+
 gym.register_envs(ale_py)
 
 
 class PongEnvironment:
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, skip=4):
 
         self.env = gym.make(
             "ALE/Pong-v5",
             render_mode=render_mode,
-            frameskip=4
+            frameskip=1,
         )
 
-        # Our agent only learns these three actions.
+        self.skip = skip
+
         self.actions = {
             0: 0,  # NOOP
             1: 3,  # LEFT
             2: 2,  # RIGHT
         }
 
-        # print("Environment:", self.env)
-        # print("Action meanings:", self.env.unwrapped.get_action_meanings())
-        # print("Observation space:", self.env.observation_space)
-        # print("Action space:", self.env.action_space)
-
     def reset(self):
 
         observation, info = self.env.reset()
 
-        # Automatically serve the ball.
+        # Start the Atari game by firing.
         observation, reward, terminated, truncated, info = (
-            self.env.step(1)  # FIRE
+            self.env.step(1)
         )
 
         return observation, info
@@ -44,11 +43,48 @@ class PongEnvironment:
                 f"Invalid action: {action}"
             )
 
-        # Translate our action into the Atari action.
         atari_action = self.actions[action]
 
-        return self.env.step(atari_action)
+        total_reward = 0.0
 
+        observations = []
+
+        terminated = False
+        truncated = False
+        info = {}
+
+        for frame in range(self.skip):
+
+            observation, reward, terminated, truncated, info = (
+                self.env.step(atari_action)
+            )
+
+            total_reward += reward
+
+            # Keep observations from the last two frames.
+            if frame >= self.skip - 2:
+                observations.append(observation)
+
+            if terminated or truncated:
+                break
+
+        # Default: use the last observation returned by Atari.
+        max_observation = observation
+
+        # Standard max-pooling when two observations
+        # from the final frames are available.
+        if len(observations) >= 2:
+            max_observation = np.maximum(
+                observations[-2],
+                observations[-1]
+            )
+
+        return (
+            max_observation,
+            total_reward,
+            terminated,
+            truncated,
+            info,
+        )
     def close(self):
-
         self.env.close()
