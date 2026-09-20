@@ -6,63 +6,95 @@ from src.batch import prepare_batch
 
 def train_step(
     model,
-    replay_buffer,
-    target_model,
-    optimizer,
-    batch_size,
-    gamma,
-    device,
+    replay_buffer=None,
+    target_model=None,
+    optimizer=None,
+    batch_size=32,
+    gamma=0.99,
+    device="cpu",
+    *args,
 ):
     """
-    Perform one DQN training update.
+    Perform one DQN update using the target network.
 
-    Returns the loss, or None if there are not enough experiences yet.
+    The keyword-based signature is the canonical API used by the Pong
+    trainer. A small backwards-compatibility path also accepts the older
+    positional form:
+
+        train_step(model, optimizer, replay_buffer, batch_size,
+                   gamma=0.99, device="cpu")
+
+    In that legacy form, the online network is used as the target because
+    no separate target network was supplied.
     """
 
-    # 1. We cannot train until we have enough experiences for a batch
+    # Backwards compatibility with the old train_step.py API.
+    if isinstance(replay_buffer, torch.optim.Optimizer):
+        old_optimizer = replay_buffer
+        old_replay_buffer = target_model
+
+        # Old signature was:
+        # train_step(model, optimizer, replay_buffer, batch_size,
+        #            gamma=0.99, device="cpu")
+        if isinstance(optimizer, int):
+            old_batch_size = optimizer
+            old_gamma = batch_size
+            old_device = gamma
+        else:
+            old_batch_size = batch_size
+            old_gamma = gamma
+            old_device = device
+
+        replay_buffer = old_replay_buffer
+        optimizer = old_optimizer
+        target_model = model
+        batch_size = old_batch_size
+
+        if isinstance(old_gamma, (int, float)):
+            gamma = old_gamma
+        if isinstance(old_device, (torch.device, str)):
+            device = old_device
+
+        if args:
+            if len(args) >= 1:
+                gamma = args[0]
+            if len(args) >= 2:
+                device = args[1]
+
+    if replay_buffer is None or optimizer is None:
+        raise TypeError(
+            "train_step requires model, replay_buffer, optimizer, "
+            "batch_size, gamma, and device."
+        )
+
+    if target_model is None:
+        target_model = model
+
     if len(replay_buffer) < batch_size:
         return None
 
-    # 2. Sample a random batch from the replay buffer
-    experiences = replay_buffer.sample(batch_size)
+    batch = replay_buffer.sample(batch_size)
 
-    # 3. Convert experiences into tensors
     states, actions, rewards, next_states, dones = prepare_batch(
-        experiences,
+        batch,
         device=device,
     )
 
-    # 4. Q-values for the actions actually taken
     current_q_values = model(states).gather(
         1,
-        actions.unsqueeze(1)
+        actions.unsqueeze(1),
     ).squeeze(1)
 
-    # 5. Bellman target
     with torch.no_grad():
         next_q_values = target_model(next_states).max(dim=1).values
+        target_q_values = rewards + gamma * next_q_values * (1.0 - dones)
 
-        target_q_values = (
-            rewards
-            + gamma * next_q_values * (1 - dones)
-        )
+    loss = F.smooth_l1_loss(current_q_values, target_q_values)
 
-    # 6. Vanilla DQN uses MSE loss
-    loss = F.mse_loss(
-        current_q_values,
-        target_q_values,
-    )
-
-    # 7. Update the online network
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
     loss.backward()
 
-    # 8. Gradient clipping
-    torch.nn.utils.clip_grad_norm_(
-        model.parameters(),
-        max_norm=10.0,
-    )
-
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
     optimizer.step()
 
     return loss.item()

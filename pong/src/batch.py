@@ -3,40 +3,36 @@ import torch
 
 
 def prepare_batch(batch, device="cpu"):
-    """
-    Convert a list of replay-buffer experiences into PyTorch tensors.
-    """
-
     states, actions, rewards, next_states, dones = zip(*batch)
 
-    states = torch.tensor(
-        np.array(states),
+    states = torch.as_tensor(
+        np.stack(states),
         dtype=torch.float32,
-        device=device
-    )
+        device=device,
+    ) / 255.0
 
-    actions = torch.tensor(
+    actions = torch.as_tensor(
         actions,
         dtype=torch.int64,
-        device=device
+        device=device,
     )
 
-    rewards = torch.tensor(
+    rewards = torch.as_tensor(
         rewards,
         dtype=torch.float32,
-        device=device
+        device=device,
     )
 
-    next_states = torch.tensor(
-        np.array(next_states),
+    next_states = torch.as_tensor(
+        np.stack(next_states),
         dtype=torch.float32,
-        device=device
-    )
+        device=device,
+    ) / 255.0
 
-    dones = torch.tensor(
+    dones = torch.as_tensor(
         dones,
         dtype=torch.float32,
-        device=device
+        device=device,
     )
 
     return states, actions, rewards, next_states, dones

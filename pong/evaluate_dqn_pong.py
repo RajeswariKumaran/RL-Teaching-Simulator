@@ -8,38 +8,41 @@ from src.action_selection import select_action
 
 
 MODEL_PATH = "pong_dqn_model.pth"
-NUM_EPISODES = 30
-MAX_STEPS_PER_EPISODE = 2000
+NUM_EPISODES = 10
+MAX_STEPS_PER_EPISODE = 1000
+NUM_ACTIONS = 3
 
 
-def evaluate():
-    # Select device
-    device = torch.device(
-        "mps" if torch.backends.mps.is_available() else "cpu"
-    )
+def load_model(device):
+    model = DQN(num_actions=NUM_ACTIONS).to(device)
 
-    print(f"Using device: {device}")
-
-    # Create environment and state manager
-    env = PongEnvironment()
-    state_manager = PongState()
-
-    # Create model
-    model = DQN(num_actions=3).to(device)
-
-    # Load trained model
     checkpoint = torch.load(
         MODEL_PATH,
         map_location=device,
         weights_only=True,
     )
 
+    # The revised trainer saves a checkpoint dictionary.
     if "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
+        state_dict = checkpoint["model_state_dict"]
     else:
-        model.load_state_dict(checkpoint)
+        # Also accept the old weights-only file.
+        state_dict = checkpoint
 
+    model.load_state_dict(state_dict)
     model.eval()
+    return model
+
+
+def evaluate():
+    device = torch.device(
+        "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+    print(f"Using device: {device}")
+
+    env = PongEnvironment()
+    state_manager = PongState()
+    model = load_model(device)
 
     episode_rewards = []
 
@@ -52,10 +55,8 @@ def evaluate():
             action_counts = Counter()
 
             for step in range(MAX_STEPS_PER_EPISODE):
-
-                # Convert state to tensor
                 state_tensor = (
-                    torch.tensor(
+                    torch.as_tensor(
                         state,
                         dtype=torch.float32,
                         device=device,
@@ -64,26 +65,20 @@ def evaluate():
                     / 255.0
                 )
 
-                # Greedy action selection
-                # with torch.no_grad():
-                #     q_values = model(state_tensor)
-
                 action = select_action(
                     model,
                     state_tensor,
                     epsilon=0.0,
+                    num_actions=NUM_ACTIONS,
                 )
 
                 action_counts[action] += 1
 
-                # Take action
                 observation, reward, terminated, truncated, _ = env.step(
                     action
                 )
 
                 total_reward += reward
-
-                # Update state
                 state = state_manager.step(observation)
 
                 if terminated or truncated:

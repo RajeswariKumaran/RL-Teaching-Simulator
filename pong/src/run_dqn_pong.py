@@ -1,252 +1,441 @@
-import torch
-from collections import deque
+import random
 
+import numpy as np
+import torch
+
+from src.action_selection import select_action
 from src.dqn import DQN
 from src.pong_environment import PongEnvironment
-from src.state import PongState
-from src.action_selection import select_action
 from src.replay_buffer import ReplayBuffer
-from src.training import train_step
+from src.state import PongState
 from src.target_network import update_target_network
+from src.training import train_step
 
 
-def main():
+# ---------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------
 
-    env = PongEnvironment()
+NUM_ACTIONS = 3
 
-    state_manager = PongState()
+BATCH_SIZE = 32
+TRAINING_START = 50_000
+TRAIN_FREQUENCY = 4
+TARGET_UPDATE_FREQUENCY = 1_000
 
-    device = torch.device(
-        "mps" if torch.backends.mps.is_available() else "cpu"
+GAMMA = 0.99
+LEARNING_RATE = 0.0001
+
+TOTAL_TRAINING_TIMESTEPS = 500_000
+
+REPLAY_BUFFER_CAPACITY = 100_000
+
+EPSILON_START = 1.0
+EPSILON_END = 0.01
+EPSILON_DECAY_STEPS = 200_000
+
+SEED = 42
+
+CHECKPOINT_FREQUENCY = 100_000
+
+MODEL_PATH = "pong_dqn_model.pth"
+
+# ---------------------------------------------------------
+# Resume configuration
+# ---------------------------------------------------------
+
+RESUME = True
+
+
+# ---------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def get_epsilon(global_step):
+    if global_step >= EPSILON_DECAY_STEPS:
+        return EPSILON_END
+
+    progress = global_step / EPSILON_DECAY_STEPS
+
+    return EPSILON_START + progress * (
+        EPSILON_END - EPSILON_START
     )
 
-    print("Using device:", device)
 
-    model = DQN().to(device)
-    print("Model device:", next(model.parameters()).device)
+def save_checkpoint(
+    model,
+    optimizer,
+    global_step,
+    episode,
+):
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "global_step": global_step,
+            "episode": episode,
+        },
+        MODEL_PATH,
+    )
 
-    target_model = DQN().to(device)
-    update_target_network(model, target_model)
+
+def load_checkpoint(
+    model,
+    target_model,
+    optimizer,
+    device,
+):
+    checkpoint = torch.load(
+        MODEL_PATH,
+        map_location=device,
+        weights_only=True,
+    )
+
+    model.load_state_dict(
+        checkpoint["model_state_dict"]
+    )
+
+    target_model.load_state_dict(
+        checkpoint["model_state_dict"]
+    )
+
+    optimizer.load_state_dict(
+        checkpoint["optimizer_state_dict"]
+    )
+
+    global_step = checkpoint["global_step"]
+    episode = checkpoint["episode"]
+
+    return global_step, episode
+
+
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
+
+def main():
+    set_seed(SEED)
+
+    device = torch.device(
+        "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+
+    print(f"Using device: {device}")
+
+    # -----------------------------------------------------
+    # Environment
+    # -----------------------------------------------------
+
+    env = PongEnvironment(seed=SEED)
+    state_manager = PongState()
+
+    # -----------------------------------------------------
+    # Models
+    # -----------------------------------------------------
+
+    model = DQN(
+        num_actions=NUM_ACTIONS
+    ).to(device)
+
+    target_model = DQN(
+        num_actions=NUM_ACTIONS
+    ).to(device)
+
     target_model.eval()
+
+    print(
+        f"Model device: "
+        f"{next(model.parameters()).device}"
+    )
+
+    # -----------------------------------------------------
+    # Optimizer
+    # -----------------------------------------------------
 
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=0.0001
+        lr=LEARNING_RATE,
     )
+
+    # -----------------------------------------------------
+    # Resume model if requested
+    # -----------------------------------------------------
+
+    if RESUME:
+        global_step, episode = load_checkpoint(
+            model=model,
+            target_model=target_model,
+            optimizer=optimizer,
+            device=device,
+        )
+
+        print(
+            f"\nResuming training from checkpoint:"
+        )
+        print(
+            f"Global steps: {global_step}"
+        )
+        print(
+            f"Episode: {episode}"
+        )
+        print(
+            "Replay buffer will be rebuilt "
+            "from new experience."
+        )
+
+    else:
+        update_target_network(
+            model,
+            target_model,
+        )
+
+        global_step = 0
+        episode = 0
+
+    # -----------------------------------------------------
+    # Replay buffer
+    # -----------------------------------------------------
 
     replay_buffer = ReplayBuffer(
-        capacity=50_000
+        capacity=REPLAY_BUFFER_CAPACITY,
     )
 
-    batch_size = 32
+    # -----------------------------------------------------
+    # Episode statistics
+    # -----------------------------------------------------
 
-    training_start = 10_000
-    train_frequency = 4
-    target_update_frequency = 1_000
+    episode_reward = 0.0
+    episode_steps = 0
+    episode_losses = []
 
-    gamma = 0.99
+    episode_actions = {
+        0: 0,
+        1: 0,
+        2: 0,
+    }
 
-    num_episodes = 1
-    max_steps_per_episode = 1_000
+    recent_rewards = []
 
-    total_training_timesteps = 1_000_000
+    # -----------------------------------------------------
+    # Environment reset
+    # -----------------------------------------------------
 
-    # ---------------------------------------------------------
-    # Epsilon-greedy exploration
-    # ---------------------------------------------------------
-    epsilon_start = 1.0
-    epsilon_end = 0.01
+    observation, _ = env.reset()
+    state = state_manager.reset(observation)
 
-    # Decay epsilon during the first 10% of the
-    # planned training timesteps.
-    # total_training_timesteps = (
-    #     num_episodes * max_steps_per_episode
-    # )
+    try:
+        while global_step < TOTAL_TRAINING_TIMESTEPS:
 
-    epsilon_decay_steps = int(
-        0.10 * total_training_timesteps
-    )
-
-    epsilon = epsilon_start
-
-    # ---------------------------------------------------------
-    # Training bookkeeping
-    # ---------------------------------------------------------
-    reward_history = deque(maxlen=10)
-
-    training_updates = 0
-    global_step = 0
-
-    for episode in range(num_episodes):
-
-        # Reset the environment
-        observation, info = env.reset()
-
-        # Create the initial 4-frame state
-        state = state_manager.reset(observation)
-
-        done = False
-        total_reward = 0
-
-        action_counts = {
-            0: 0,  # NOOP
-            1: 0,  # LEFT
-            2: 0,  # RIGHT
-        }
-
-        episode_losses = []
-
-        for step in range(max_steps_per_episode):
-
-            # -------------------------------------------------
-            # Calculate epsilon from global training timestep
-            # -------------------------------------------------
-            if global_step < epsilon_decay_steps:
-                decay_progress = (
-                    global_step / epsilon_decay_steps
-                )
-
-                epsilon = (
-                    epsilon_start
-                    + decay_progress
-                    * (epsilon_end - epsilon_start)
-                )
-            else:
-                epsilon = epsilon_end
-
-            # -------------------------------------------------
-            # Convert state to tensor
-            # -------------------------------------------------
-            state_tensor = torch.tensor(
-                state,
-                dtype=torch.float32,
-                device=device
-            ).unsqueeze(0) / 255.0
+            epsilon = get_epsilon(global_step)
 
             # -------------------------------------------------
             # Select action
             # -------------------------------------------------
+
+            state_tensor = (
+                torch.as_tensor(
+                    state,
+                    dtype=torch.float32,
+                    device=device,
+                )
+                .unsqueeze(0)
+                / 255.0
+            )
+
             action = select_action(
                 model,
                 state_tensor,
-                epsilon=epsilon
+                epsilon,
+                num_actions=NUM_ACTIONS,
             )
 
-            action_counts[action] += 1
+            episode_actions[action] += 1
 
             # -------------------------------------------------
-            # Take action in Pong
+            # Environment step
             # -------------------------------------------------
-            observation, reward, terminated, truncated, info = (
-                env.step(action)
+
+            (
+                next_observation,
+                reward,
+                terminated,
+                truncated,
+                _,
+            ) = env.step(action)
+
+            next_state = state_manager.step(
+                next_observation
             )
 
-            # -------------------------------------------------
-            # Create next state
-            # -------------------------------------------------
-            next_state = state_manager.step(observation)
-
-            # -------------------------------------------------
-            # Check episode termination
-            # -------------------------------------------------
             done = terminated or truncated
 
             # -------------------------------------------------
             # Store experience
             # -------------------------------------------------
+
             replay_buffer.push(
                 state,
                 action,
                 reward,
                 next_state,
-                done
+                done,
             )
 
-            # -------------------------------------------------
-            # Train every 4 environment steps
-            # -------------------------------------------------
-            if (
-                global_step >= training_start
-                and len(replay_buffer) >= batch_size
-                and global_step % train_frequency == 0
-            ):
+            state = next_state
 
+            global_step += 1
+            episode_steps += 1
+            episode_reward += reward
+
+            # -------------------------------------------------
+            # Train
+            # -------------------------------------------------
+
+            if (
+                global_step >= TRAINING_START
+                and global_step % TRAIN_FREQUENCY == 0
+            ):
                 loss = train_step(
                     model=model,
+                    replay_buffer=replay_buffer,
                     target_model=target_model,
                     optimizer=optimizer,
-                    replay_buffer=replay_buffer,
-                    batch_size=batch_size,
-                    gamma=gamma,
-                    device=device
+                    batch_size=BATCH_SIZE,
+                    gamma=GAMMA,
+                    device=device,
                 )
 
                 if loss is not None:
-
                     episode_losses.append(loss)
 
-                    training_updates += 1
+            # -------------------------------------------------
+            # Target network
+            # -------------------------------------------------
 
-                    # Update target network periodically
-                    if (
-                        training_updates
-                        % target_update_frequency
-                        == 0
-                    ):
-                        update_target_network(
-                            model,
-                            target_model
-                        )
+            if (
+                global_step
+                % TARGET_UPDATE_FREQUENCY
+                == 0
+            ):
+                update_target_network(
+                    model,
+                    target_model,
+                )
 
             # -------------------------------------------------
-            # Move to next state
+            # Episode completed
             # -------------------------------------------------
-            state = next_state
-
-            total_reward += reward
-
-            global_step += 1
 
             if done:
-                break
+                episode += 1
 
-        # -----------------------------------------------------
-        # Episode statistics
-        # -----------------------------------------------------
-        average_loss = (
-            sum(episode_losses) / len(episode_losses)
-            if episode_losses
-            else None
-        )
+                recent_rewards.append(
+                    episode_reward
+                )
 
-        reward_history.append(total_reward)
+                if len(recent_rewards) > 10:
+                    recent_rewards.pop(0)
 
-        average_reward = (
-            sum(reward_history)
-            / len(reward_history)
-        )
+                average_reward = (
+                    sum(recent_rewards)
+                    / len(recent_rewards)
+                )
 
-        print(
-            f"Episode {episode + 1}: "
-            f"Total reward = {total_reward}, "
-            f"Average reward (last {len(reward_history)}) = "
-            f"{average_reward:.2f}, "
-            f"Replay buffer size = {len(replay_buffer)}, "
-            f"Average Loss = {average_loss}, "
-            f"Epsilon = {epsilon:.3f}, "
-            f"Global steps = {global_step}, "
-            f"Actions = {action_counts}"
-        )
+                average_loss = (
+                    sum(episode_losses)
+                    / len(episode_losses)
+                    if episode_losses
+                    else None
+                )
+
+                print(
+                    f"Episode {episode}: "
+                    f"Total reward = "
+                    f"{episode_reward:.1f}, "
+                    f"Average reward "
+                    f"(last {len(recent_rewards)}) = "
+                    f"{average_reward:.2f}, "
+                    f"Replay buffer size = "
+                    f"{len(replay_buffer)}, "
+                    f"Average Loss = "
+                    f"{average_loss}, "
+                    f"Epsilon = "
+                    f"{epsilon:.3f}, "
+                    f"Global steps = "
+                    f"{global_step}, "
+                    f"Episode steps = "
+                    f"{episode_steps}, "
+                    f"Actions = "
+                    f"{episode_actions}"
+                )
+
+                episode_reward = 0.0
+                episode_steps = 0
+                episode_losses = []
+
+                episode_actions = {
+                    0: 0,
+                    1: 0,
+                    2: 0,
+                }
+
+                observation, _ = env.reset()
+
+                state = state_manager.reset(
+                    observation
+                )
+
+            # -------------------------------------------------
+            # Periodic checkpoint
+            # -------------------------------------------------
+
+            if (
+                global_step
+                % CHECKPOINT_FREQUENCY
+                == 0
+            ):
+                save_checkpoint(
+                    model,
+                    optimizer,
+                    global_step,
+                    episode,
+                )
+
+                print(
+                    f"Checkpoint saved at "
+                    f"{global_step} steps."
+                )
+
+    finally:
+        env.close()
 
     # ---------------------------------------------------------
-    # Save trained model
+    # Final checkpoint
     # ---------------------------------------------------------
-    torch.save(
-        model.state_dict(),
-        "pong_dqn_model.pth"
+
+    save_checkpoint(
+        model,
+        optimizer,
+        global_step,
+        episode,
     )
 
-    env.close()
+    print("\nTraining complete.")
+    print(
+        f"Total training timesteps: "
+        f"{global_step}"
+    )
+    print(
+        f"Model saved to {MODEL_PATH}"
+    )
 
 
 if __name__ == "__main__":

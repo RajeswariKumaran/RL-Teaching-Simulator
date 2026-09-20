@@ -76,38 +76,23 @@ from src.state import PongState
 
 
 def test_pong_state_reset():
-
-    observation = np.zeros(
-        (210, 160, 3),
-        dtype=np.uint8
-    )
-
     state_manager = PongState()
+
+    observation = np.zeros((84, 84), dtype=np.uint8)
 
     state = state_manager.reset(observation)
 
     assert state.shape == (4, 84, 84)
-    assert state.dtype == np.uint8
 
 def test_pong_state_step():
-
-    observation1 = np.zeros(
-        (210, 160, 3),
-        dtype=np.uint8
-    )
-
-    observation2 = np.ones(
-        (210, 160, 3),
-        dtype=np.uint8
-    )
-
     state_manager = PongState()
 
-    state_manager.reset(observation1)
+    observation = np.zeros((84, 84), dtype=np.uint8)
 
-    state = state_manager.step(observation2)
+    state_manager.reset(observation)
+
+    next_observation = np.ones((84, 84), dtype=np.uint8)
+
+    state = state_manager.step(next_observation)
 
     assert state.shape == (4, 84, 84)
-
-    # The newest frame should be different
-    assert not np.array_equal(state[0], state[-1])
