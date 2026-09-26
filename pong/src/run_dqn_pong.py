@@ -31,8 +31,8 @@ TOTAL_TRAINING_TIMESTEPS = 500_000
 REPLAY_BUFFER_CAPACITY = 100_000
 
 EPSILON_START = 1.0
-EPSILON_END = 0.01
-EPSILON_DECAY_STEPS = 200_000
+EPSILON_END = 0.05
+EPSILON_DECAY_STEPS = 500_000
 
 SEED = 42
 
@@ -44,7 +44,7 @@ MODEL_PATH = "pong_dqn_model.pth"
 # Resume configuration
 # ---------------------------------------------------------
 
-RESUME = True
+RESUME = False
 
 
 # ---------------------------------------------------------
