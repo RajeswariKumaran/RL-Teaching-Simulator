@@ -1,22 +1,31 @@
 import torch
-from collections import Counter
+import numpy as np
+from collections import deque
 
 from src.dqn import DQN
 from src.pong_environment import PongEnvironment
 from src.state import PongState
 
 
-# ---------------------------------------------------------
+# ============================================================
 # Configuration
-# ---------------------------------------------------------
+# ============================================================
 
-VANILLA_MODEL_PATH = "pong_dqn_model_500K_Vanila.pth"
-DOUBLE_DQN_MODEL_PATH = "pong_dqn_model_500K_DoubleDQN.pth"
+MODEL_PATH = "pong_dqn_model.pth"
 
+MAX_STEPS = 2000
 NUM_EPISODES = 5
-MAX_STEPS_PER_EPISODE = 2000
 
-NUM_ACTIONS = 3
+HISTORY_LENGTH = 20
+
+DEVICE = torch.device(
+    "mps" if torch.backends.mps.is_available() else "cpu"
+)
+
+
+# ============================================================
+# Helpers
+# ============================================================
 
 ACTION_NAMES = {
     0: "NOOP",
@@ -25,333 +34,419 @@ ACTION_NAMES = {
 }
 
 
-# ---------------------------------------------------------
-# Load model
-# ---------------------------------------------------------
+def get_q_values(model, state):
+    """
+    Run the current state through the network and return
+    Q-values for NOOP, LEFT and RIGHT.
+    """
 
-def load_model(path, device):
-
-    model = DQN(num_actions=NUM_ACTIONS).to(device)
-
-    checkpoint = torch.load(
-        path,
-        map_location=device,
-        weights_only=True,
-    )
-
-    if "model_state_dict" in checkpoint:
-        model.load_state_dict(
-            checkpoint["model_state_dict"]
-        )
-    else:
-        model.load_state_dict(checkpoint)
-
-    model.eval()
-
-    return model
-
-
-# ---------------------------------------------------------
-# Get Q-values
-# ---------------------------------------------------------
-
-def get_q_values(model, state, device):
-
-    state_tensor = (
-        torch.as_tensor(
-            state,
-            dtype=torch.float32,
-            device=device,
-        )
-        .unsqueeze(0)
-        / 255.0
-    )
+    state_tensor = torch.tensor(
+        state,
+        dtype=torch.float32,
+        device=DEVICE
+    ).unsqueeze(0) / 255.0
 
     with torch.no_grad():
-        q_values = model(state_tensor)
+        q_values = model(state_tensor)[0]
 
-    q_values = q_values.squeeze(0)
-
-    action = q_values.argmax().item()
-
-    return q_values.cpu().tolist(), action
+    return q_values.cpu().numpy()
 
 
-# ---------------------------------------------------------
-# Main diagnostic
-# ---------------------------------------------------------
+def calculate_margin(q_values):
+    """
+    Difference between the largest and second-largest Q-value.
+    """
 
-def diagnose():
+    sorted_q = np.sort(q_values)[::-1]
 
-    device = torch.device(
-        "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
+    return float(sorted_q[0] - sorted_q[1])
+
+
+def count_action_changes(history):
+    """
+    Count how many times the selected action changed
+    within the supplied history.
+    """
+
+    if len(history) < 2:
+        return 0
+
+    actions = [item["action"] for item in history]
+
+    return sum(
+        actions[i] != actions[i - 1]
+        for i in range(1, len(actions))
     )
 
-    print(f"Using device: {device}")
 
-    # -----------------------------------------------------
-    # Load both models
-    # -----------------------------------------------------
+def get_history_metric(history, steps_back):
+    """
+    Get a metric from a specific number of steps before
+    the current event.
 
-    vanilla_model = load_model(
-        VANILLA_MODEL_PATH,
-        device,
-    )
+    steps_back=0  -> event itself
+    steps_back=5  -> five steps before event
+    steps_back=10 -> ten steps before event
+    """
 
-    double_model = load_model(
-        DOUBLE_DQN_MODEL_PATH,
-        device,
-    )
+    index = len(history) - 1 - steps_back
 
-    print("Loaded both models.")
+    if index < 0:
+        return None
 
-    # -----------------------------------------------------
-    # Environment
-    # -----------------------------------------------------
+    return history[index]
 
-    env = PongEnvironment()
-    state_manager = PongState()
 
-    total_states = 0
-    different_actions = 0
-
-    vanilla_action_counts = Counter()
-    double_action_counts = Counter()
-
-    vanilla_rewards = []
-    double_rewards = []
-
-    try:
-
-        for episode in range(NUM_EPISODES):
-
-            print()
-            print("=" * 70)
-            print(f"EPISODE {episode + 1}")
-            print("=" * 70)
-
-            observation, _ = env.reset()
-
-            state = state_manager.reset(
-                observation
-            )
-
-            vanilla_episode_reward = 0.0
-            double_episode_reward = 0.0
-
-            # The environment is actually being controlled by
-            # the vanilla model. We compare what Double DQN
-            # WOULD have done on the exact same states.
-            for step in range(MAX_STEPS_PER_EPISODE):
-
-                # -------------------------------------------------
-                # Get both models' Q-values
-                # -------------------------------------------------
-
-                vanilla_q, vanilla_action = get_q_values(
-                    vanilla_model,
-                    state,
-                    device,
-                )
-
-                double_q, double_action = get_q_values(
-                    double_model,
-                    state,
-                    device,
-                )
-
-                vanilla_action_counts[
-                    vanilla_action
-                ] += 1
-
-                double_action_counts[
-                    double_action
-                ] += 1
-
-                total_states += 1
-
-                if vanilla_action != double_action:
-                    different_actions += 1
-
-                # -------------------------------------------------
-                # Take VANILLA action
-                # -------------------------------------------------
-
-                observation, reward, terminated, truncated, _ = (
-                    env.step(vanilla_action)
-                )
-
-                vanilla_episode_reward += reward
-                double_episode_reward += reward
-
-                # -------------------------------------------------
-                # Print reward events
-                # -------------------------------------------------
-
-                if reward != 0:
-
-                    print()
-                    print(
-                        f"Step {step + 1}: "
-                        f"REWARD = {reward:+.0f}"
-                    )
-
-                    print(
-                        "Vanilla DQN:"
-                    )
-
-                    print(
-                        f"  NOOP  = {vanilla_q[0]: .4f}"
-                    )
-
-                    print(
-                        f"  LEFT  = {vanilla_q[1]: .4f}"
-                    )
-
-                    print(
-                        f"  RIGHT = {vanilla_q[2]: .4f}"
-                    )
-
-                    print(
-                        f"  Action = "
-                        f"{ACTION_NAMES[vanilla_action]}"
-                    )
-
-                    print(
-                        "Double DQN:"
-                    )
-
-                    print(
-                        f"  NOOP  = {double_q[0]: .4f}"
-                    )
-
-                    print(
-                        f"  LEFT  = {double_q[1]: .4f}"
-                    )
-
-                    print(
-                        f"  RIGHT = {double_q[2]: .4f}"
-                    )
-
-                    print(
-                        f"  Action = "
-                        f"{ACTION_NAMES[double_action]}"
-                    )
-
-                state = state_manager.step(
-                    observation
-                )
-
-                if terminated or truncated:
-                    break
-
-            vanilla_rewards.append(
-                vanilla_episode_reward
-            )
-
-            double_rewards.append(
-                double_episode_reward
-            )
-
-            print()
-            print(
-                f"Episode {episode + 1} complete"
-            )
-
-            print(
-                f"Steps: {step + 1}"
-            )
-
-            print(
-                f"Reward received: "
-                f"{vanilla_episode_reward:.1f}"
-            )
-
-            print(
-                f"Vanilla actions: "
-                f"{dict(vanilla_action_counts)}"
-            )
-
-            print(
-                f"Double actions: "
-                f"{dict(double_action_counts)}"
-            )
-
-    finally:
-        env.close()
-
-    # ---------------------------------------------------------
-    # Summary
-    # ---------------------------------------------------------
-
-    agreement = (
-        100.0
-        * (total_states - different_actions)
-        / total_states
-    )
-
-    disagreement = (
-        100.0
-        * different_actions
-        / total_states
-    )
+def print_event(event_name, step, history):
 
     print()
-    print("=" * 70)
-    print("DIAGNOSTIC SUMMARY")
-    print("=" * 70)
+    print("=" * 80)
+    print(f"{event_name} at step {step}")
+    print("=" * 80)
+
+    action_changes = count_action_changes(history)
+
+    margins = [item["margin"] for item in history]
 
     print(
-        f"States compared: {total_states}"
+        f"Action changes in previous "
+        f"{len(history)} steps: {action_changes}"
     )
 
     print(
-        f"Same action: "
-        f"{total_states - different_actions} "
-        f"({agreement:.2f}%)"
+        f"Maximum margin in history: "
+        f"{max(margins):.3f}"
     )
 
-    print(
-        f"Different action: "
-        f"{different_actions} "
-        f"({disagreement:.2f}%)"
-    )
+    event_item = get_history_metric(history, 0)
+    five_back = get_history_metric(history, 5)
+    ten_back = get_history_metric(history, 10)
+
+    if event_item is not None:
+        print(
+            f"Margin at event:             "
+            f"{event_item['margin']:.3f}"
+        )
+
+    if five_back is not None:
+        print(
+            f"Margin 5 steps before:        "
+            f"{five_back['margin']:.3f}"
+        )
+
+    if ten_back is not None:
+        print(
+            f"Margin 10 steps before:       "
+            f"{ten_back['margin']:.3f}"
+        )
 
     print()
 
     print(
-        "Vanilla action counts:"
+        f"{'Step':>6} "
+        f"{'Q[N]':>9} "
+        f"{'Q[L]':>9} "
+        f"{'Q[R]':>9} "
+        f"{'Margin':>9} "
+        f"{'Action':>8} "
+        f"{'Reward':>8}"
     )
-    print(
-        dict(vanilla_action_counts)
+
+    print("-" * 80)
+
+    for item in history:
+
+        q = item["q_values"]
+
+        print(
+            f"{item['step']:6d} "
+            f"{q[0]:9.3f} "
+            f"{q[1]:9.3f} "
+            f"{q[2]:9.3f} "
+            f"{item['margin']:9.3f} "
+            f"{ACTION_NAMES[item['action']]:>8} "
+            f"{item['reward']:8.1f}"
+        )
+
+
+def record_event_statistics(
+    history,
+    margin_list,
+    max_margin_list,
+    margin_5_list,
+    margin_10_list,
+    action_change_list
+):
+    """
+    Store diagnostic statistics for a reward event.
+    """
+
+    event_item = get_history_metric(history, 0)
+    five_back = get_history_metric(history, 5)
+    ten_back = get_history_metric(history, 10)
+
+    if event_item is None:
+        return
+
+    margin_list.append(event_item["margin"])
+
+    max_margin_list.append(
+        max(item["margin"] for item in history)
     )
+
+    if five_back is not None:
+        margin_5_list.append(five_back["margin"])
+
+    if ten_back is not None:
+        margin_10_list.append(ten_back["margin"])
+
+    action_change_list.append(
+        count_action_changes(history)
+    )
+
+
+def print_summary(
+    name,
+    margins,
+    max_margins,
+    margin_5,
+    margin_10,
+    action_changes
+):
 
     print()
+    print(name)
+
+    if not margins:
+        print("  No events found.")
+        return
+
+    print(f"  Events:                  {len(margins)}")
 
     print(
-        "Double DQN action counts:"
+        f"  Average event margin:    "
+        f"{np.mean(margins):.4f}"
     )
+
     print(
-        dict(double_action_counts)
+        f"  Median event margin:     "
+        f"{np.median(margins):.4f}"
     )
+
+    print(
+        f"  Average maximum margin:  "
+        f"{np.mean(max_margins):.4f}"
+    )
+
+    if margin_5:
+        print(
+            f"  Average margin -5:       "
+            f"{np.mean(margin_5):.4f}"
+        )
+
+    if margin_10:
+        print(
+            f"  Average margin -10:      "
+            f"{np.mean(margin_10):.4f}"
+        )
+
+    print(
+        f"  Average action changes:   "
+        f"{np.mean(action_changes):.2f}"
+    )
+
+
+# ============================================================
+# Load model
+# ============================================================
+
+print(f"Using device: {DEVICE}")
+
+model = DQN(num_actions=3).to(DEVICE)
+
+checkpoint = torch.load(
+    MODEL_PATH,
+    map_location=DEVICE,
+    weights_only=True
+)
+
+if "model_state_dict" in checkpoint:
+    model.load_state_dict(checkpoint["model_state_dict"])
+else:
+    model.load_state_dict(checkpoint)
+
+model.eval()
+
+print(f"Loaded model: {MODEL_PATH}")
+
+
+# ============================================================
+# Environment
+# ============================================================
+
+env = PongEnvironment(render_mode=None)
+state_manager = PongState()
+
+
+# ============================================================
+# Statistics
+# ============================================================
+
+# Miss statistics
+miss_margins = []
+miss_max_margins = []
+miss_margin_5 = []
+miss_margin_10 = []
+miss_action_changes = []
+
+# Success statistics
+success_margins = []
+success_max_margins = []
+success_margin_5 = []
+success_margin_10 = []
+success_action_changes = []
+
+
+# ============================================================
+# Run diagnostic episodes
+# ============================================================
+
+for episode in range(1, NUM_EPISODES + 1):
+
+    observation, info = env.reset()
+
+    state = state_manager.reset(observation)
+
+    history = deque(maxlen=HISTORY_LENGTH)
+
+    episode_reward = 0
 
     print()
+    print(
+        f"\n{'=' * 80}\n"
+        f"EPISODE {episode}\n"
+        f"{'=' * 80}"
+    )
+
+    for step in range(1, MAX_STEPS + 1):
+
+        # ----------------------------------------------------
+        # Q-values and action
+        # ----------------------------------------------------
+
+        q_values = get_q_values(model, state)
+
+        action = int(np.argmax(q_values))
+
+        margin = calculate_margin(q_values)
+
+        # ----------------------------------------------------
+        # Environment step
+        # ----------------------------------------------------
+
+        next_observation, reward, terminated, truncated, info = (
+            env.step(action)
+        )
+
+        next_state = state_manager.step(next_observation)
+
+        episode_reward += reward
+
+        # ----------------------------------------------------
+        # Store current decision
+        # ----------------------------------------------------
+
+        event = {
+            "step": step,
+            "q_values": q_values,
+            "margin": margin,
+            "action": action,
+            "reward": reward,
+        }
+
+        history.append(event)
+
+        # ----------------------------------------------------
+        # Diagnose reward events
+        # ----------------------------------------------------
+
+        if reward == -1:
+
+            record_event_statistics(
+                history,
+                miss_margins,
+                miss_max_margins,
+                miss_margin_5,
+                miss_margin_10,
+                miss_action_changes,
+            )
+
+            print_event(
+                "MISS (-1)",
+                step,
+                list(history)
+            )
+
+        elif reward == 1:
+
+            record_event_statistics(
+                history,
+                success_margins,
+                success_max_margins,
+                success_margin_5,
+                success_margin_10,
+                success_action_changes,
+            )
+
+            print_event(
+                "SUCCESS (+1)",
+                step,
+                list(history)
+            )
+
+        # ----------------------------------------------------
+        # Move to next state
+        # ----------------------------------------------------
+
+        state = next_state
+
+        if terminated or truncated:
+            break
 
     print(
-        "Vanilla rewards:"
+        f"\nEpisode {episode} finished: "
+        f"reward={episode_reward}"
     )
-    print(vanilla_rewards)
-
-    print()
-
-    print(
-        "Rewards experienced while "
-        "following vanilla policy:"
-    )
-    print(double_rewards)
 
 
-if __name__ == "__main__":
-    diagnose()
+# ============================================================
+# Summary
+# ============================================================
+
+print()
+print("=" * 80)
+print("DIAGNOSTIC SUMMARY")
+print("=" * 80)
+
+print_summary(
+    "MISSES (-1)",
+    miss_margins,
+    miss_max_margins,
+    miss_margin_5,
+    miss_margin_10,
+    miss_action_changes,
+)
+
+print_summary(
+    "SUCCESSES (+1)",
+    success_margins,
+    success_max_margins,
+    success_margin_5,
+    success_margin_10,
+    success_action_changes,
+)
+
+print()
+print("=" * 80)
+print("DONE")
+print("=" * 80)
