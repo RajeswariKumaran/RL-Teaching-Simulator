@@ -3,6 +3,7 @@
 A visual, interactive simulator for learning the fundamental ideas behind
 Reinforcement Learning.
 
+# GridWorld Agent 🏓
 The first project in this repository is a **GridWorld agent** that starts with
 no knowledge of its environment and gradually learns how to reach its goal
 through experience.
