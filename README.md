@@ -157,3 +157,272 @@ interaction with its environment.
 
 More environments and reinforcement learning concepts will be added as the
 project evolves.
+
+# Pong DQN 🏓
+
+The second project in **RL-Teaching-Simulator** explores how a reinforcement learning agent can learn to play Atari Pong automatically using a neural network.
+
+Unlike GridWorld, where the agent learns from a small, discrete set of states, Pong presents a much more challenging problem. The agent receives visual observations of the game, must understand how the ball and paddle are moving, and learns which actions are likely to lead to better outcomes.
+
+The agent is not given instructions on how to track the ball or when to move the paddle. It learns through repeated interaction, rewards, and experience.
+
+---
+
+## From random actions to learned gameplay
+
+### Before training
+
+Initially, the agent has no meaningful understanding of the game. It selects actions using randomly initialized Q-values and exploration.
+
+Its objective is to learn which paddle movements are more valuable in different situations.
+
+### After training
+
+After training for one million environment steps, the agent begins to demonstrate meaningful gameplay. It moves its paddle in response to the ball, changes direction when necessary, and learns a policy that can achieve positive average rewards.
+
+The final Vanilla DQN model achieved an average reward of **+0.42 over 100 evaluation episodes**, with each episode evaluated for up to 2,000 steps.
+
+This is a significant improvement over the earlier stages of training, although the agent does not win consistently in every episode.
+
+---
+
+## How does the agent learn to play Pong?
+
+The learning process builds on the same fundamental idea introduced in GridWorld: **the value of an action depends on both its immediate reward and what it can lead to in the future.**
+
+The implementation is based on Deep Q-Learning, which combines Q-learning with a neural network.
+
+The main training implementation can be found in:
+
+`pong/run_dqn_pong.py`
+
+The Q-learning update is implemented in:
+
+`pong/src/training.py`
+
+## 1. From a Q-table to a neural network
+
+In GridWorld, the agent can maintain a table of Q-values for individual states and actions.
+
+Pong is different. The agent receives images of the game, and the number of possible visual states is far too large to represent using a conventional Q-table.
+
+Instead, a **Deep Q-Network (DQN)** uses a convolutional neural network to estimate Q-values directly from the visual state.
+
+The network receives four consecutive frames of the game, each processed into an 84 × 84 grayscale image.
+
+The four frames provide information about movement, allowing the agent to infer how the ball and paddle are changing position.
+
+The neural network architecture is implemented in:
+
+`pong/src/dqn.py`
+
+The four-frame state representation is implemented in:
+
+`pong/src/state.py`
+
+## 2. The Bellman equation: What comes next matters
+
+The Bellman equation provides the foundation for learning action values.
+
+For Pong, the optimal action-value function can be expressed as:
+
+$$
+Q^*(s,a)=
+\mathbb{E}\left[
+r+\gamma\max_{a'}Q^*(s',a')
+\mid s,a
+\right]
+$$
+
+In simple terms:
+
+> **The value of a paddle movement depends on the reward received and the best future outcome that can follow it.**
+
+A paddle movement may not produce an immediate reward. However, moving into a better position may increase the probability of returning the ball and eventually scoring a point.
+
+This is how the agent learns to value actions that contribute to future success rather than only reacting to immediate rewards.
+
+## 3. The DQN target: Learning from experience
+
+The neural network learns by comparing its current Q-value estimate with a target calculated from experience.
+
+The DQN target is:
+
+$$
+y=r+\gamma\max_{a'}Q_{\text{target}}(s',a')(1-\text{done})
+$$
+
+The target combines:
+
+- The **immediate reward** received after taking an action.
+- The **discounted future value** estimated for the next state.
+- A terminal-state mask that prevents future rewards from being added after an episode ends.
+
+The implementation is in:
+
+`pong/src/training.py`
+
+The network gradually adjusts its parameters to reduce the difference between its current estimate and the calculated target.
+
+## 4. Experience replay: Learning from past interactions
+
+An important difference between this project and the GridWorld implementation is the use of **experience replay**.
+
+Instead of learning only from the most recent interaction, the agent stores experiences containing:
+
+- The current state
+- The action taken
+- The reward received
+- The next state
+- Whether the episode terminated
+
+During training, the agent samples a batch of experiences from this replay buffer and learns from them.
+
+This helps reduce the dependence between consecutive experiences and allows the agent to reuse previous interactions.
+
+Implementation:
+
+`pong/src/replay_buffer.py`
+
+## 5. Target networks: Stabilizing learning
+
+The DQN uses two neural networks:
+
+- **Online network:** Learns and updates its parameters during training.
+- **Target network:** Provides a more stable reference for calculating learning targets.
+
+The target network periodically receives the online network's parameters rather than changing after every training update.
+
+This helps reduce instability caused by continuously changing targets.
+
+Implementation:
+
+`pong/src/target_network.py`
+
+## 6. Exploration and exploitation
+
+The agent must balance two competing behaviours:
+
+- **Exploration:** Trying different actions to discover better strategies.
+- **Exploitation:** Choosing actions that currently have the highest estimated Q-values.
+
+This project uses epsilon-greedy action selection.
+
+At the beginning of training, the agent explores frequently. As training progresses, epsilon decreases, and the agent increasingly relies on its learned Q-values.
+
+The final training configuration used:
+
+- Initial epsilon: 1.0
+- Final epsilon: 0.05
+- Epsilon decay: 500,000 training steps
+- Total training: 1,000,000 environment steps
+
+Implementation:
+
+`pong/src/action_selection.py`
+
+The epsilon schedule and training configuration are defined in:
+
+`pong/run_dqn_pong.py`
+
+---
+
+## The result: What did the agent learn?
+
+The final Vanilla DQN model was evaluated over 100 episodes.
+
+| Metric | Result |
+|---|---:|
+| Training steps | 1,000,000 |
+| Evaluation episodes | 100 |
+| Average reward | +0.42 |
+| Average evaluation episode length | 2,000 steps |
+
+The agent achieved positive average reward, although individual episodes varied considerably.
+
+The project also explored different training durations and compared Vanilla DQN with Double DQN. These experiments demonstrated that additional training and changes to the learning algorithm do not necessarily guarantee improved performance.
+
+Evaluation implementation:
+
+`pong/evaluate_dqn_pong.py`
+
+Behavioural diagnostics:
+
+`pong/diagnose_dqn_pong.py`
+
+---
+
+## GridWorld versus Pong
+
+The two projects illustrate how reinforcement learning can be extended from a simple environment to a much more complex problem.
+
+| GridWorld | Pong |
+|---|---|
+| Discrete, small state space | High-dimensional visual state |
+| Q-table | Neural network approximating Q-values |
+| State directly represents position | State represented by stacked image frames |
+| Tabular Q-learning | Deep Q-Learning |
+| Learns a path to a goal | Learns a paddle-control policy |
+| Relatively simple value updates | Experience replay and target networks |
+
+The underlying principle remains the same:
+
+> **The agent learns which actions are valuable by interacting with its environment and using rewards to improve its estimates.**
+
+What changes is how the agent represents the state and how it learns to estimate action values.
+
+---
+
+## Project structure
+
+```text
+RL-Teaching-Simulator/
+│
+├── README.md
+│
+├── assets/
+│   ├── gridworld_before_training.png
+│   └── gridworld_after_training.png
+│
+├── gridworld/
+│   └── src/
+│       └── rl/
+│           └── algorithms/
+│               └── q_learning.py
+│
+└── pong/
+    ├── run_dqn_pong.py
+    ├── evaluate_dqn_pong.py
+    ├── diagnose_dqn_pong.py
+    │
+    └── src/
+        ├── dqn.py
+        ├── training.py
+        ├── target_network.py
+        ├── replay_buffer.py
+        ├── state.py
+        ├── action_selection.py
+        └── pong_environment.py
+```
+
+---
+
+## Why this project?
+
+Deep reinforcement learning can appear abstract when presented only through equations and neural network architectures.
+
+Pong makes those ideas observable.
+
+The project demonstrates how an agent can learn from visual observations without being explicitly programmed to track the ball, position its paddle, or follow a winning strategy.
+
+It also illustrates an important lesson:
+
+**A working learning algorithm does not automatically produce a perfect policy.**
+
+The quality of learning depends on the representation, exploration strategy, training duration, stability mechanisms, and evaluation methodology.
+
+The Pong project extends the ideas introduced in GridWorld and provides a practical foundation for exploring more advanced reinforcement learning algorithms.
+
+### Explore the implementation
+
+The complete implementation, training scripts, evaluation code, and GridWorld project are available in the [RL-Teaching-Simulator GitHub repository](https://github.com/RajeswariKumaran/RL-Teaching-Simulator).
