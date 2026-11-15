@@ -80,8 +80,15 @@ After every new experience, it adjusts that estimate.
 
 The Q-learning update is:
 
+$$
+Q^{*}(s,a)
+=
+\mathbb{E}\left[
+r+\gamma\max_{a'}Q^{*}(s',a')
+\mid s,a
+\right]
+$$
 
-$$Q(s, a) \leftarrow Q(s, a) + \alpha \left[r + \gamma \max_{a'} Q(s', a') - Q(s, a)\right]$$
 
 In simple terms, I find it helpful to think about the same idea as:
 
