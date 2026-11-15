@@ -424,6 +424,4 @@ The quality of learning depends on the representation, exploration strategy, tra
 
 The Pong project extends the ideas introduced in GridWorld and provides a practical foundation for exploring more advanced reinforcement learning algorithms.
 
-### Explore the implementation
 
-The complete implementation, training scripts, evaluation code, and GridWorld project are available in the [RL-Teaching-Simulator GitHub repository](https://github.com/RajeswariKumaran/RL-Teaching-Simulator).
