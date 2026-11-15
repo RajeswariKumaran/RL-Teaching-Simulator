@@ -78,19 +78,15 @@ has an estimate based on what it has experienced so far.
 
 After every new experience, it adjusts that estimate.
 
+
 The Q-learning update is:
 
-$$
-Q^{*}(s,a)
-=
-\mathbb{E}\left[
-r+\gamma\max_{a'}Q^{*}(s',a')
-\mid s,a
-\right]
-$$
-
+```math
+Q(s,a) \leftarrow Q(s,a) + \alpha \left[r + \gamma \max_{a'} Q(s',a') - Q(s,a)\right]
+```
 
 In simple terms, I find it helpful to think about the same idea as:
+
 
 > **New value estimate = Old value estimate + Adjustment based on the current experience**
 
@@ -234,15 +230,13 @@ The Bellman equation provides the foundation for learning action values.
 
 For Pong, the optimal action-value function can be expressed as:
 
-$$
-Q^*(s,a)=
-\mathbb{E}\left[
-r+\gamma\max_{a'}Q^*(s',a')
-\mid s,a
-\right]
-$$
+```math
+Q^{*}(s,a) = \mathbb{E}\left[r + \gamma \max_{a'} Q^{*}(s',a') \mid s,a\right]
+```
 
 In simple terms:
+
+
 
 > **The value of a paddle movement depends on the reward received and the best future outcome that can follow it.**
 
