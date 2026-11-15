@@ -374,6 +374,12 @@ What changes is how the agent represents the state and how it learns to estimate
 
 ---
 
+## Watch the trained agent play Pong 🏓
+
+The following video demonstrates the trained DQN agent playing Atari Pong.
+
+https://github.com/user-attachments/assets/a88b87e3-4192-4beb-b4b5-0e44666842c9
+
 ## Project structure
 
 ```text
